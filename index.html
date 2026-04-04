@@ -78,13 +78,35 @@ body { overflow:hidden; background:#000; font-family:'Arial Black',Impact,sans-s
 /* Touch controls */
 #touch-controls { position:fixed; bottom:0; left:0; width:100%; height:45vh; display:none; pointer-events:none; z-index:20; }
 .tc-zone { position:absolute; bottom:10px; display:flex; pointer-events:all; }
-.tc-zone-left { left:10px; }
+.tc-zone-left { left:10px; flex-direction:column; align-items:center; gap:8px; }
 .tc-zone-right { right:10px; flex-direction:column; align-items:center; gap:10px; }
-.tc-btn { background:rgba(255,255,255,.1); border:2px solid rgba(255,255,255,.2); border-radius:50%; color:#fff; font-size:26px; display:flex; align-items:center; justify-content:center; user-select:none; -webkit-user-select:none; touch-action:none; backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); transition:background .08s; }
+.tc-boost-row { display:flex; justify-content:center; }
+.tc-btn { background:rgba(255,255,255,.1); border:2px solid rgba(255,255,255,.2); border-radius:50%; color:#fff; display:flex; align-items:center; justify-content:center; user-select:none; -webkit-user-select:none; touch-action:none; backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); transition:all .08s; }
 .tc-btn:active { background:rgba(255,255,255,.3); }
 .tc-steer { display:flex; gap:10px; align-items:center; }
-.tc-steer .tc-btn { width:68px; height:68px; font-size:24px; }
-.tc-action { width:72px; height:72px; font-size:26px; }
+.tc-steer .tc-btn {
+  width:68px; height:68px;
+  display:flex; align-items:center; justify-content:center;
+  text-align:center; min-width:68px; min-height:68px;
+  font-size:26px; line-height:1; padding:0;
+}
+.tc-pedal {
+  width:68px; height:90px; border-radius:10px;
+  background:linear-gradient(180deg,#3a3a3a 0%,#2a2a2a 100%);
+  border:2px solid rgba(255,255,255,.15);
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 4px 12px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.08);
+  transition:all .08s;
+}
+.tc-pedal.pressed {
+  background:linear-gradient(180deg,#2a8a2a 0%,#1a6a1a 100%);
+  border-color:rgba(0,255,0,.4);
+  box-shadow:0 0 20px rgba(0,200,0,.4),0 2px 6px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.1);
+  transform:translateY(2px) scale(0.96);
+}
+.tc-pedal.pressed svg rect:first-child { fill:#4a4; stroke:#6c6; }
+.tc-pedal.pressed svg line { stroke:#3a3; }
+.tc-pedal.pressed svg rect:nth-last-child(2) { fill:#6a6; stroke:#8c8; }
 .tc-boost { width:56px; height:56px; font-size:20px; background:rgba(255,180,0,.12); border-color:rgba(255,180,0,.3); }
 
 /* Screens */
@@ -203,24 +225,33 @@ body { overflow:hidden; background:#000; font-family:'Arial Black',Impact,sans-s
 <!-- Touch controls -->
 <div id="touch-controls">
   <div class="tc-zone tc-zone-left">
+    <div class="tc-boost-row"><div class="tc-btn tc-boost" id="tc-boost">⚡</div></div>
     <div class="tc-steer">
-      <div class="tc-btn" id="tc-left">⬅</div>
-      <div class="tc-btn" id="tc-right">➡</div>
+      <div class="tc-btn" id="tc-left">◀</div>
+      <div class="tc-btn" id="tc-right">▶</div>
     </div>
   </div>
   <div class="tc-zone tc-zone-right">
-    <div class="tc-btn tc-action" id="tc-gas"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" fill="none">
-  <polygon points="14,3 26,25 2,25" fill="white" opacity="0.95"/>
-  <rect x="12.5" y="17" width="3" height="6" rx="1.5" fill="#111"/>
-</svg></div>
-    <div class="tc-btn tc-boost" id="tc-boost">⚡</div>
+    <div class="tc-btn tc-pedal" id="tc-gas">
+      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="72" viewBox="0 0 48 72" fill="none">
+        <rect x="8" y="0" width="32" height="64" rx="6" fill="#555" stroke="#777" stroke-width="1.5"/>
+        <line x1="14" y1="10" x2="34" y2="10" stroke="#444" stroke-width="2" stroke-linecap="round"/>
+        <line x1="14" y1="18" x2="34" y2="18" stroke="#444" stroke-width="2" stroke-linecap="round"/>
+        <line x1="14" y1="26" x2="34" y2="26" stroke="#444" stroke-width="2" stroke-linecap="round"/>
+        <line x1="14" y1="34" x2="34" y2="34" stroke="#444" stroke-width="2" stroke-linecap="round"/>
+        <line x1="14" y1="42" x2="34" y2="42" stroke="#444" stroke-width="2" stroke-linecap="round"/>
+        <line x1="14" y1="50" x2="34" y2="50" stroke="#444" stroke-width="2" stroke-linecap="round"/>
+        <rect x="6" y="58" width="36" height="10" rx="3" fill="#888" stroke="#aaa" stroke-width="1"/>
+        <circle cx="24" cy="63" r="2.5" fill="#666" stroke="#999" stroke-width="0.5"/>
+      </svg>
+    </div>
   </div>
 </div>
 
 <!-- Start screen -->
 <div class="screen" id="startScreen">
   <div class="start-title">🏎️ CURSA KART 3D</div>
-  <div class="start-sub">Gavà Grand Circuit · 3 Vueltas · v7</div>
+  <div class="start-sub">Gavà Grand Circuit · 3 Vueltas · v7 · DIFICULTAD EXTREMA 🔥</div>
   <div class="drivers">
     <div class="driver-card selected" data-driver="0" style="--card-theme:#1a6bff;--card-glow:rgba(26,107,255,.5);--card-bg:linear-gradient(135deg,#0a1a4a 0%,#0d2060 100%);--badge-bg:rgba(26,107,255,.18);--badge-border:#1a6bff;">
       <div class="driver-kart"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 64" width="80" height="64">
@@ -345,9 +376,9 @@ const TOTAL_LAPS  = 3;
 const ROAD_W      = 26;
 const KERB_W      = 3;
 const SAMPLES     = 500;
-const MAX_SPEED   = 78;
-const BOOST_SPD   = 118;
-const ACCEL       = 36;
+const MAX_SPEED   = 119;
+const BOOST_SPD   = 179;
+const ACCEL       = 55;
 const BRAKE_F     = 52;
 const IDLE_FRIC   = 14;
 const GRASS_FRIC  = 50;
@@ -730,14 +761,17 @@ function makeItemBox(trackT) {
     new THREE.BoxGeometry(1.4,1.4,1.4),
     mkMat(0xffffff, { transparent:true, opacity:0.75 })
   );
-  // Cross / ? symbol
   const crossH = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.3,0.12), mkMat(0x0055ee));
   const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.3,1.1,0.12), mkMat(0x0055ee));
   crossH.position.z = 0.01; crossV.position.z = 0.01;
   grp.add(outer, inner, crossH, crossV);
-  grp.position.copy(s.point); grp.position.y = 1.5;
+
+  // Place on track center, slightly offset to the right side of the road
+  const pos = s.point.clone().addScaledVector(s.right, 2);
+  pos.y = 1.5;
+  grp.position.copy(pos);
   scene.add(grp);
-  return { grp, point: s.point.clone(), active: true, respawn: 0 };
+  return { grp, point: pos.clone(), active: true, respawn: 0 };
 }
 [0.1, 0.22, 0.45, 0.67, 0.88].forEach(t => itemBoxes.push(makeItemBox(t)));
 
@@ -745,10 +779,10 @@ function makeItemBox(trackT) {
 // CAR CLASS
 // ================================================================
 const CAR_CFG = [
-  { body:0x1144ee, accent:0x002299, name:'Camilo', aiSpeed:1.08 },
-  { body:0xff7700, accent:0xcc4400, name:'Rafa',   aiSpeed:1.02 },
-  { body:0xff44aa, accent:0xcc1177, name:'Alba',   aiSpeed:0.96 },
-  { body:0x7a5230, accent:0x4a2e10, name:'Therian',aiSpeed:0.90 },
+  { body:0x1144ee, accent:0x002299, name:'Camilo', aiSpeed:1.32 },
+  { body:0xff7700, accent:0xcc4400, name:'Rafa',   aiSpeed:1.32 },
+  { body:0xff44aa, accent:0xcc1177, name:'Alba',   aiSpeed:1.32 },
+  { body:0x7a5230, accent:0x4a2e10, name:'Therian',aiSpeed:1.32 },
 ];
 
 class Car {
@@ -797,7 +831,20 @@ class Car {
   }
 
   maxSpd() {
-    const base = this.isPlayer ? MAX_SPEED : MAX_SPEED * this.aiSpeedMult;
+    if (this.isPlayer) return this.boostTime > 0 ? BOOST_SPD : MAX_SPEED;
+    const playerCar = cars.find(c => c.isPlayer);
+    let rubberBoost = 0;
+    if (playerCar) {
+      const gap = this.totalProg - playerCar.totalProg;
+      if (gap < -0.30) rubberBoost = 0.15;
+      else if (gap < -0.15) rubberBoost = 0.10;
+      else if (gap < -0.05) rubberBoost = 0.05;
+    }
+    const lapPhase = Math.sin(this.totalProg * Math.PI * 2 + this.idx * 1.7) * 0.05;
+    const randomWave = Math.sin(raceTime * 0.25 + this.idx * 2.3) * 0.03;
+    const raceMomentum = Math.sin(raceTime * 0.08 + this.idx * 3.1) * 0.02;
+    const dynamicVar = lapPhase + randomWave + raceMomentum;
+    const base = MAX_SPEED * (this.aiSpeedMult + rubberBoost + dynamicVar);
     return this.boostTime > 0 ? BOOST_SPD : base;
   }
 
@@ -840,81 +887,83 @@ class Car {
   }
 
   stepAI(dt) {
-    const onGrass = this.distFromTrack > ROAD_W / 2 + 1;
+    const playerCar = cars.find(c => c.isPlayer);
 
-    if (onGrass) {
-      // RECOVERY MODE: find nearest track point globally and aim ahead
-      const near = nearestSampleGlobal(this.pos);
-      this.sIdx = near.idx;
-      this.distFromTrack = near.dist;
-
-      const la = 20;
-      const ti = (this.sIdx + la) % SAMPLES;
-      const ts = tSamp[ti];
-      const toTrack = ts.point.clone().sub(this.pos);
-      const tgtAngle = Math.atan2(toTrack.x, toTrack.z);
-
-      let diff = tgtAngle - this.angle;
-      while (diff >  Math.PI) diff -= Math.PI*2;
-      while (diff < -Math.PI) diff += Math.PI*2;
-      this.aiAngleDiff = diff;
-
-      this.angle += Math.sign(diff) * Math.min(Math.abs(diff), TURN_BASE * 3.5 * dt);
-
-      const tgtSpd = Math.min(this.maxSpd() * 0.25, 12);
-      const spDiff = tgtSpd - this.speed;
-      this.speed += Math.sign(spDiff) * Math.min(Math.abs(spDiff), ACCEL * 2.5 * dt);
-      this.speed = Math.max(0, Math.min(this.maxSpd(), this.speed));
-    } else {
-      // TRACK MODE: adaptive look-ahead based on speed + curve
-      const la = 35 + Math.floor(this.speed / 3);
-      const ti = (this.sIdx + la) % SAMPLES;
-      const ts = tSamp[ti];
-
-      // Also look further ahead for curve preview
-      const laFar = (this.sIdx + la + 25) % SAMPLES;
-      const tsFar = tSamp[laFar];
-      const farDiff = Math.abs(Math.atan2(tsFar.tangent.x, tsFar.tangent.z) - Math.atan2(ts.tangent.x, ts.tangent.z));
-      // If curve ahead, slow down early
-      const curveAhead = farDiff > 0.4;
-
-      // Lateral offset from track center
-      const toCar = this.pos.clone().sub(tSamp[this.sIdx].point);
-      const lateralOff = toCar.x * tSamp[this.sIdx].right.x + toCar.z * tSamp[this.sIdx].right.z;
-
-      // Target direction = track tangent + correction toward center
-      const tgtDir = ts.tangent.clone();
-      tgtDir.x -= lateralOff * 0.12 * tSamp[this.sIdx].right.x;
-      tgtDir.z -= lateralOff * 0.12 * tSamp[this.sIdx].right.z;
-      tgtDir.normalize();
-
-      const tgtAngle = Math.atan2(tgtDir.x, tgtDir.z);
-
-      let diff = tgtAngle - this.angle;
-      while (diff >  Math.PI) diff -= Math.PI*2;
-      while (diff < -Math.PI) diff += Math.PI*2;
-      this.aiAngleDiff = diff;
-
-      // Faster steering
-      this.angle += Math.sign(diff) * Math.min(Math.abs(diff), TURN_BASE * 2.4 * dt);
-
-      // Speed management: brake earlier and harder in curves
-      const curvePenalty = Math.min(0.45, Math.abs(diff) * 0.8);
-      const offCenterPenalty = Math.min(0.2, Math.abs(lateralOff) / (ROAD_W * 0.5));
-      let tgtSpd = this.maxSpd() * (1 - curvePenalty - offCenterPenalty);
-
-      // Pre-brake for curves ahead
-      if (curveAhead) {
-        tgtSpd *= 0.75;
+    // Defensive driving: detect if player is close
+    let defending = false;
+    let defendSide = 0;
+    if (playerCar && !this.isPlayer) {
+      const toPlayer = playerCar.pos.clone().sub(this.pos);
+      const distToPlayer = toPlayer.length();
+      const fwdX = Math.sin(this.angle), fwdZ = Math.cos(this.angle);
+      const relFwd = toPlayer.x * fwdX + toPlayer.z * fwdZ;
+      const relLat = toPlayer.x * tSamp[this.sIdx].right.x + toPlayer.z * tSamp[this.sIdx].right.z;
+      // Only defend if player is close AND we're not near the edge
+      const myLatOff = (this.pos.clone().sub(tSamp[this.sIdx].point)).x * tSamp[this.sIdx].right.x + (this.pos.clone().sub(tSamp[this.sIdx].point)).z * tSamp[this.sIdx].right.z;
+      if (distToPlayer < ROAD_W * 1.5 && relFwd < ROAD_W * 2 && relFwd > -ROAD_W * 3 && Math.abs(myLatOff) < ROAD_W * 0.2) {
+        defending = true;
+        defendSide = Math.sign(relLat);
       }
-
-      tgtSpd = Math.max(20, tgtSpd);
-
-      // Faster acceleration
-      const spDiff = tgtSpd - this.speed;
-      this.speed += Math.sign(spDiff) * Math.min(Math.abs(spDiff), ACCEL * 2.5 * dt);
-      this.speed = Math.max(0, Math.min(this.maxSpd(), this.speed));
     }
+
+    // TRACK MODE: always follow the road
+    const la = 35 + Math.floor(this.speed / 3);
+    const ti = (this.sIdx + la) % SAMPLES;
+    const ts = tSamp[ti];
+
+    const laFar = (this.sIdx + la + 25) % SAMPLES;
+    const tsFar = tSamp[laFar];
+    const farDiff = Math.abs(Math.atan2(tsFar.tangent.x, tsFar.tangent.z) - Math.atan2(ts.tangent.x, ts.tangent.z));
+    const curveAhead = farDiff > 0.4;
+
+    const toCar = this.pos.clone().sub(tSamp[this.sIdx].point);
+    let lateralOff = toCar.x * tSamp[this.sIdx].right.x + toCar.z * tSamp[this.sIdx].right.z;
+
+    // Strong centering force: always push toward center
+    const centeringStrength = 0.15;
+    lateralOff *= (1 + centeringStrength * 5);
+
+    // Defensive: small offset to block, but stay on track
+    if (defending) {
+      lateralOff += defendSide * ROAD_W * 0.15;
+    }
+
+    // Clamp lateral offset to stay well within road edges
+    const maxLat = ROAD_W * 0.35;
+    lateralOff = Math.max(-maxLat, Math.min(maxLat, lateralOff));
+
+    const tgtDir = ts.tangent.clone();
+    tgtDir.x -= lateralOff * 0.15 * tSamp[this.sIdx].right.x;
+    tgtDir.z -= lateralOff * 0.15 * tSamp[this.sIdx].right.z;
+    tgtDir.normalize();
+
+    const tgtAngle = Math.atan2(tgtDir.x, tgtDir.z);
+
+    let diff = tgtAngle - this.angle;
+    while (diff >  Math.PI) diff -= Math.PI*2;
+    while (diff < -Math.PI) diff += Math.PI*2;
+    this.aiAngleDiff = diff;
+
+    this.angle += Math.sign(diff) * Math.min(Math.abs(diff), TURN_BASE * 2.6 * dt);
+
+    // Speed management: minimal braking - AI carries speed through corners
+    const curvePenalty = Math.min(0.35, Math.abs(diff) * 0.5);
+    const offCenterPenalty = Math.min(0.1, Math.abs(lateralOff) / (ROAD_W * 0.5));
+    let tgtSpd = this.maxSpd() * (1 - curvePenalty - offCenterPenalty);
+
+    if (curveAhead) {
+      tgtSpd *= 0.82;
+    }
+
+    if (defending) {
+      tgtSpd *= 1.06;
+    }
+
+    tgtSpd = Math.max(35, tgtSpd);
+
+    const spDiff = tgtSpd - this.speed;
+    this.speed += Math.sign(spDiff) * Math.min(Math.abs(spDiff), ACCEL * 3.5 * dt);
+    this.speed = Math.max(0, Math.min(this.maxSpd(), this.speed));
 
     this.steerVis = this.aiAngleDiff * 0.35;
     this.rollVis  = -this.steerVis * 0.18;
@@ -938,6 +987,18 @@ class Car {
     }
     this.sIdx = near.idx; this.trackT = near.idx / SAMPLES;
     this.distFromTrack = near.dist;
+
+    // AI track discipline: if near edge, push back toward center
+    if (!this.isPlayer && this.distFromTrack > ROAD_W * 0.35) {
+      const nearest = tSamp[this.sIdx];
+      const toCenter = nearest.point.clone().sub(this.pos);
+      const latDist = Math.abs(toCenter.x * nearest.right.x + toCenter.z * nearest.right.z);
+      if (latDist > ROAD_W * 0.15) {
+        const pushStrength = Math.min(0.5, (latDist - ROAD_W * 0.15) / ROAD_W);
+        this.pos.x += nearest.right.x * pushStrength * 2 * dt * this.speed;
+        this.pos.z += nearest.right.z * pushStrength * 2 * dt * this.speed;
+      }
+    }
 
     // Wrong direction detection (player only)
     if (this.isPlayer && raceTime > 3 && this.speed > 5) {
@@ -1295,7 +1356,7 @@ function initAudio() {
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     masterGain = audioCtx.createGain();
-    masterGain.gain.value = 0.3;
+    masterGain.gain.value = soundMuted ? 0 : 0.3;
     masterGain.connect(audioCtx.destination);
   } catch(e) {}
 }
