@@ -357,10 +357,13 @@ body { overflow:hidden; background:#000; font-family:'Arial Black',Impact,sans-s
   <!-- exhaust -->
   <rect x="6" y="36" width="8" height="5" rx="2" fill="#444"/>
   <rect x="3" y="37" width="5" height="3" rx="1" fill="#666"/>
+  <!-- L plate (trasera del kart) -->
+  <rect x="4" y="29" width="10" height="8" rx="1.5" fill="#FFE000" stroke="#ccc" stroke-width=".5"/>
+  <text x="9" y="36.5" font-size="7" font-weight="900" font-family="Arial Black,Arial" fill="#CC0000" text-anchor="middle">L</text>
 </svg></div>
-      <div class="driver-name">Therian</div>
-      <div class="driver-role">El salvaje</div>
-      <div class="driver-desc">Marrón & Negro 🐾</div>
+      <div class="driver-name">Ivan</div>
+      <div class="driver-role">El primerizo</div>
+      <div class="driver-desc">El primerizo con la L 🅻</div>
       <div class="driver-you">TÚ ✓</div>
     </div>
   </div>
@@ -880,7 +883,7 @@ const CAR_CFG = [
   { body:0x1144ee, accent:0x002299, name:'Camilo', aiSpeed:1.32 },
   { body:0xff7700, accent:0xcc4400, name:'Rafa',   aiSpeed:1.32 },
   { body:0xff44aa, accent:0xcc1177, name:'Alba',   aiSpeed:1.32 },
-  { body:0x7a5230, accent:0x4a2e10, name:'Therian',aiSpeed:1.32 },
+  { body:0x7a5230, accent:0x4a2e10, name:'Ivan',   aiSpeed:1.32 },
 ];
 
 class Car {
@@ -892,6 +895,35 @@ class Car {
 
     this.mesh = createCar(cfg.body, cfg.accent);
     scene.add(this.mesh);
+
+    // L plate on rear bumper for Ivan (idx 3)
+    if (idx === 3) {
+      const lCanvas = document.createElement('canvas');
+      lCanvas.width = 128; lCanvas.height = 80;
+      const lCtx = lCanvas.getContext('2d');
+      // Yellow background
+      lCtx.fillStyle = '#FFE000';
+      lCtx.beginPath();
+      lCtx.roundRect(2, 2, 124, 76, 8);
+      lCtx.fill();
+      // Black border
+      lCtx.strokeStyle = '#333';
+      lCtx.lineWidth = 4;
+      lCtx.stroke();
+      // Red L
+      lCtx.fillStyle = '#CC0000';
+      lCtx.font = 'bold 68px Arial Black';
+      lCtx.textAlign = 'center';
+      lCtx.textBaseline = 'middle';
+      lCtx.fillText('L', 64, 42);
+      const lTex = new THREE.CanvasTexture(lCanvas);
+      const lMat = new THREE.MeshPhongMaterial({ map: lTex, shininess: 40 });
+      const lPlate = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.08), lMat);
+      // Position on rear of car: z = -3.86 (rear face), y = 1.1 (above bumper center), slightly raised
+      lPlate.position.set(0, 1.2, -3.88);
+      lPlate.castShadow = false;
+      this.mesh.add(lPlate);
+    }
 
     const s0 = tSamp[0];
     this.pos   = s0.point.clone().addScaledVector(s0.right, sideOffset);
