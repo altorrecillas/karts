@@ -406,7 +406,7 @@ body { overflow:hidden; background:#000; font-family:'Arial Black',Impact,sans-s
     </div>
   </div>
     <button class="start-btn" onclick="startCountdown()">🏁 ARRANCAR</button>
-  <div class="controls-hint">↑ Acelerar &nbsp;·&nbsp; ↓ Frenar &nbsp;·&nbsp; ← → Girar &nbsp;·&nbsp; ESPACIO Boost</div>
+  <div class="controls-hint">↑ Acelerar &nbsp;·&nbsp; ↓ Frenar &nbsp;·&nbsp; ← → Girar &nbsp;·&nbsp; ESPACIO Boost &nbsp;·&nbsp; R Reaparecer</div>
   <button class="sound-toggle" id="soundToggle" onclick="toggleSound()">🔊 SONIDO</button>
 </div>
 
@@ -449,7 +449,10 @@ const GRASS_CAP   = 26;
 const TURN_BASE   = 2.2;
 const BOOST_DUR   = 3.2;
 const BOOST_CD    = 9;
-const LAP_CD      = 6; // seconds before laps are counted (prevents false starts)
+const MINI_TURBO_DUR = 1.3;  // duración del mini-turbo por derrape
+const MINI_TURBO_SPD = 22;   // velocidad extra durante mini-turbo
+const SLIP_RETAIN = 0.55;    // fracción de inercia que no sigue al giro (derrape)
+const DRAFT_DIST  = 24;      // distancia máxima para rebufo
 
 // ================================================================
 // RENDERER / SCENE / CAMERA
@@ -1282,7 +1285,19 @@ function makeItemBox(trackT) {
   pos.y = 1.5;
   grp.position.copy(pos);
   scene.add(grp);
-  return { grp, point: pos.clone(), active: true, respawn: 0 };
+  return { grp, point: pos.clone(), active: true, respawn: 0, trackT };
+}
+
+// Recoloca las cajas sobre el trazado activo (se llama al cambiar de circuito)
+function repositionItemBoxes() {
+  itemBoxes.forEach(b => {
+    const s = tSamp[Math.floor(b.trackT * SAMPLES)];
+    const pos = s.point.clone().addScaledVector(s.right, 2);
+    pos.y = 1.5;
+    b.grp.position.copy(pos);
+    b.point.copy(pos);
+    b.active = true; b.grp.visible = true; b.respawn = 0;
+  });
 }
 [0.1, 0.22, 0.45, 0.67, 0.88].forEach(t => itemBoxes.push(makeItemBox(t)));
 
@@ -1347,8 +1362,17 @@ class Car {
     this.trackT = 0;
     this.prevT  = 0;
     this.lap    = 1;
+    this.progress = 0;     // progreso continuo con signo (vueltas = floor(progress)+1)
     this.totalProg = 0;
     this.distFromTrack = 0;
+
+    // Sensación de kart (solo jugador): derrape, mini-turbo, rebufo
+    this.slipV = 0;          // velocidad lateral de deslizamiento
+    this.driftCharge = 0;    // carga de derrape sostenido
+    this.miniTurbo = 0;      // temporizador de mini-turbo
+    this._chargeNotified = false;
+    this._slipstream = false;
+    this.respawnCD = 0;
 
     this.boostTime = 0;
     this.boostCD   = 0;
@@ -1373,26 +1397,34 @@ class Car {
   }
 
   maxSpd() {
-    if (this.isPlayer) return this.boostTime > 0 ? BOOST_SPD : MAX_SPEED;
-    const playerCar = cars.find(c => c.isPlayer);
-    let rubberBoost = 0;
-    if (playerCar) {
-      const gap = this.totalProg - playerCar.totalProg;
-      if (gap < -0.20) rubberBoost = 0.22;
-      else if (gap < -0.10) rubberBoost = 0.15;
-      else if (gap < -0.04) rubberBoost = 0.08;
+    if (this.isPlayer) {
+      let ms = this.boostTime > 0 ? BOOST_SPD : MAX_SPEED;
+      if (this.miniTurbo > 0) ms += MINI_TURBO_SPD;
+      if (this._slipstream)   ms *= 1.08;
+      return ms;
     }
-    const lapPhase    = Math.sin(this.totalProg * Math.PI * 2 + this.idx * 1.7) * 0.04;
-    const randomWave  = Math.sin(raceTime * 0.25 + this.idx * 2.3) * 0.025;
-    const raceMomentum= Math.sin(raceTime * 0.08 + this.idx * 3.1) * 0.018;
-    const dynamicVar  = lapPhase + randomWave + raceMomentum;
-    // DDA: speed multiplier scales with difficulty (0=slow AI, 1=fast AI)
-    // easy: ~0.78x MAX_SPEED, hard: ~1.0x MAX_SPEED
-    const ddaSpeedMult = 0.80 + aiDifficulty * 0.38; // easy=0.80 (95), hard=1.18 (140)
-    // Turbo burst: temporary extra speed when player leads
+    const playerCar = cars.find(c => c.isPlayer);
+    // Rubberband bidireccional: empuja si va detrás, afloja si va muy delante.
+    // Mantiene la carrera apretada sin que la IA sea imbatible.
+    let rubber = 0;
+    if (playerCar && !playerCar.finished) {
+      const gap = this.totalProg - playerCar.totalProg; // + = IA por delante
+      if      (gap < -0.18) rubber =  0.16;
+      else if (gap < -0.08) rubber =  0.10;
+      else if (gap < -0.03) rubber =  0.05;
+      else if (gap >  0.12) rubber = -0.10;
+      else if (gap >  0.05) rubber = -0.05;
+    }
+    const lapPhase    = Math.sin(this.totalProg * Math.PI * 2 + this.idx * 1.7) * 0.03;
+    const randomWave  = Math.sin(raceTime * 0.25 + this.idx * 2.3) * 0.02;
+    const dynamicVar  = lapPhase + randomWave;
+    // DDA: easy ≈ 0.86x MAX_SPEED (102), hard ≈ 1.03x (122)
+    const ddaSpeedMult = 0.86 + aiDifficulty * 0.17;
     const turboBonusSpd = (this._turboBurst > 0) ? this._turboMult : 0;
-    const base = MAX_SPEED * (ddaSpeedMult + rubberBoost + dynamicVar + turboBonusSpd);
-    return this.boostTime > 0 ? BOOST_SPD : base;
+    const base = MAX_SPEED * (ddaSpeedMult + rubber + dynamicVar + turboBonusSpd);
+    // Tope duro: la IA nunca supera el boost del jugador
+    const cap = MAX_SPEED * 1.18;
+    return this.boostTime > 0 ? BOOST_SPD : Math.min(cap, base);
   }
 
   update(dt) {
@@ -1404,10 +1436,38 @@ class Car {
   }
 
   stepPlayer(dt) {
+    // ── Rebufo: pegado detrás de otro coche ganas velocidad punta ──
+    this._slipstream = false;
+    if (this.speed > 45) {
+      const fx = Math.sin(this.angle), fz = Math.cos(this.angle);
+      for (const c of cars) {
+        if (c === this) continue;
+        const dx = c.pos.x - this.pos.x, dz = c.pos.z - this.pos.z;
+        const d = Math.hypot(dx, dz);
+        if (d > 4 && d < DRAFT_DIST && (dx * fx + dz * fz) / d > 0.92) {
+          this._slipstream = true; break;
+        }
+      }
+    }
+
+    // ── Respawn manual (R) o automático si está muy perdido ──
+    if (this.respawnCD > 0) this.respawnCD -= dt;
+    if ((keys.respawn && this.respawnCD <= 0) || this.distFromTrack > 80) {
+      const rec = nearestSampleGlobal(this.pos);
+      const s = tSamp[rec.idx];
+      this.pos.set(s.point.x, 0, s.point.z);
+      this.angle = Math.atan2(s.tangent.x, s.tangent.z);
+      this.sIdx = rec.idx;
+      this.speed = Math.min(this.speed, 30);
+      this.slipV = 0; this.driftCharge = 0;
+      this.respawnCD = 2;
+    }
+
     const ms = this.maxSpd();
     const _roadHalf = ROAD_W / 2 + (selectedTrack === 1 ? 6 : 1); const onGrass = this.distFromTrack > _roadHalf;
 
-    if (keys.up)   this.speed += ACCEL * dt;
+    const accel = ACCEL * (this.miniTurbo > 0 ? 1.6 : 1) * (this._slipstream ? 1.25 : 1);
+    if (keys.up)   this.speed += accel * dt;
     if (keys.down) this.speed -= BRAKE_F * dt * 0.62;
     if (!keys.up && !keys.down) {
       const f = onGrass ? GRASS_FRIC : IDLE_FRIC;
@@ -1415,13 +1475,45 @@ class Car {
         ? Math.max(0, this.speed - f * dt)
         : Math.min(0, this.speed + f * dt);
     }
-    const cap = onGrass ? Math.min(ms, GRASS_CAP) : ms;
+    // Con boost activo la hierba apenas frena: permite atajos estratégicos
+    const grassCap = this.boostTime > 0 ? BOOST_SPD * 0.55 : GRASS_CAP;
+    const cap = onGrass ? Math.min(ms, grassCap) : ms;
     this.speed = Math.max(-22, Math.min(cap, this.speed));
 
     const spFactor = Math.min(1, Math.abs(this.speed) / 25);
-    const turn = TURN_BASE * spFactor * dt * (this.speed < 0 ? -1 : 1);
-    if (keys.left)  this.angle += turn;
-    if (keys.right) this.angle -= turn;
+    // A velocidad punta el giro se endurece un poco (estabilidad en rectas)
+    const hiSpeed = Math.max(0, (Math.abs(this.speed) - 70) / (MAX_SPEED - 70));
+    const turnRate = TURN_BASE * (1 - Math.min(1, hiSpeed) * 0.22);
+    const steerIn = keys.left ? 1 : keys.right ? -1 : 0;
+    const applied = steerIn * turnRate * spFactor * dt * (this.speed < 0 ? -1 : 1);
+    this.angle += applied;
+
+    // ── Deslizamiento lateral: parte de la inercia no sigue al giro ──
+    const grip = onGrass ? 3.2 : 6.5;
+    this.slipV += -this.speed * applied * SLIP_RETAIN;
+    this.slipV -= this.slipV * Math.min(1, grip * dt);
+    this.slipV = Math.max(-26, Math.min(26, this.slipV));
+
+    // ── Mini-turbo por derrape sostenido ──
+    const cornering = steerIn !== 0 && this.speed > 55 && !onGrass;
+    if (cornering) {
+      this.driftCharge += dt;
+      if (this.driftCharge > 1.0 && !this._chargeNotified) {
+        this._chargeNotified = true;
+        playPickup(); // aviso sonoro: mini-turbo cargado
+      }
+    } else {
+      if (this.driftCharge > 1.0 && !onGrass && this.speed > 40) {
+        this.miniTurbo = MINI_TURBO_DUR;
+        const bf = document.getElementById('boostFlash');
+        if (bf) bf.textContent = '💨 ¡MINI-TURBO!';
+        flashMsg('boostFlash', 800);
+        playBoost();
+      }
+      this.driftCharge = Math.max(0, this.driftCharge - dt * 3);
+      this._chargeNotified = false;
+    }
+    if (this.miniTurbo > 0) this.miniTurbo -= dt;
 
     const tgtSteer = keys.left ? 0.42 : keys.right ? -0.42 : 0;
     this.steerVis += (tgtSteer - this.steerVis) * 9 * dt;
@@ -1490,9 +1582,14 @@ class Car {
 
     // Lateral correction: stronger pull-to-center for Montmelo
     const toCar = this.pos.clone().sub(tSamp[this.sIdx].point);
-    let lateralOff = toCar.x * tSamp[this.sIdx].right.x + toCar.z * tSamp[this.sIdx].right.z;
+    const rawLat = toCar.x * tSamp[this.sIdx].right.x + toCar.z * tSamp[this.sIdx].right.z;
     const centerMult = isMontmelo ? 2.2 : 1.75;
-    lateralOff *= centerMult;
+
+    // Línea de carrera: apuntar al interior de la curva que viene (ápice)
+    // dAng > 0 = curva a izquierdas → interior = lado izquierdo (offset negativo)
+    const apexClamp = ROAD_W * 0.22;
+    const apexTarget = Math.max(-apexClamp, Math.min(apexClamp, -dAng * ROAD_W * 0.9));
+    let lateralOff = (rawLat - apexTarget) * centerMult;
 
     if (defending) {
       lateralOff += defendSide * ROAD_W * 0.15;
@@ -1515,6 +1612,23 @@ class Car {
     let diff = tgtAngle - this.angle;
     while (diff >  Math.PI) diff -= Math.PI*2;
     while (diff < -Math.PI) diff += Math.PI*2;
+
+    // Evasión: esquivar al coche que tiene justo delante en su trayectoria
+    let avoidBrake = 1;
+    {
+      const fx = Math.sin(this.angle), fz = Math.cos(this.angle);
+      const rxv = Math.cos(this.angle), rzv = -Math.sin(this.angle);
+      for (const c of cars) {
+        if (c === this) continue;
+        const dx = c.pos.x - this.pos.x, dz = c.pos.z - this.pos.z;
+        const fwd = dx * fx + dz * fz;
+        const lat = dx * rxv + dz * rzv;
+        if (fwd > 0 && fwd < 14 && Math.abs(lat) < 4) {
+          diff += (lat >= 0 ? -1 : 1) * 0.45 * (1 - fwd / 14);
+          if (fwd < 8 && this.speed > c.speed + 5) avoidBrake = 0.9;
+        }
+      }
+    }
     this.aiAngleDiff = diff;
 
     // Faster steering response for Montmelo
@@ -1541,6 +1655,7 @@ class Car {
       tgtSpd *= curveSlowFactor;
     }
     if (defending) tgtSpd *= 1.06;
+    tgtSpd *= avoidBrake;
 
     // Minimum speed: lower for Montmelo hairpins
     // DDA: easy AI has lower min speed (gets stuck more on hairpins)
@@ -1563,6 +1678,13 @@ class Car {
     // Move
     this.pos.x += Math.sin(this.angle) * this.speed * dt + this.pushX * dt;
     this.pos.z += Math.cos(this.angle) * this.speed * dt + this.pushZ * dt;
+
+    // Deslizamiento lateral del jugador (derrape)
+    if (this.isPlayer && this.slipV !== 0) {
+      const rx = Math.cos(this.angle), rz = -Math.sin(this.angle);
+      this.pos.x += rx * this.slipV * dt;
+      this.pos.z += rz * this.slipV * dt;
+    }
 
     // Decay collision push
     this.pushX *= 0.9;
@@ -1665,28 +1787,34 @@ class Car {
     if (this._turboBurst > 0) this._turboBurst = Math.max(0, this._turboBurst - dt);
     if (this.boostCD   > 0) this.boostCD   = Math.max(0, this.boostCD   - dt);
 
-    // Lap detection
+    // Lap detection: progreso continuo con signo.
+    // Ir marcha atrás resta progreso (sin exploit de cruzar la meta en reversa)
+    // y los saltos grandes de re-localización no cuentan como avance.
     const prev = this.prevT, curr = this.trackT;
-    if (raceTime > LAP_CD && prev > 0.82 && curr < 0.18 && this.speed > 5) {
-      this.lap++;
+    let dProg = curr - prev;
+    if (dProg >  0.5) dProg -= 1;
+    else if (dProg < -0.5) dProg += 1;
+    if (Math.abs(dProg) < 0.2) this.progress += dProg;
+    this.prevT = curr;
+    this.totalProg = this.progress;
+
+    const lapNow = Math.floor(this.progress) + 1;
+    if (lapNow > this.lap) {
+      this.lap = lapNow;
       if (this.lap > TOTAL_LAPS) {
         this.lap = TOTAL_LAPS;
         this.finished = true;
         this.finTime  = raceTime;
         onFinish(this);
-      } else {
-        if (this.isPlayer) {
-            flashMsg('lapFlash', 2200); playLap();
-            // Record lap time for DDA
-            if (this._lapStartTime !== undefined) {
-              playerLapTimes.push(raceTime - this._lapStartTime);
-            }
-            this._lapStartTime = raceTime;
-          }
+      } else if (this.isPlayer) {
+        flashMsg('lapFlash', 2200); playLap();
+        // Record lap time for DDA
+        if (this._lapStartTime !== undefined) {
+          playerLapTimes.push(raceTime - this._lapStartTime);
+        }
+        this._lapStartTime = raceTime;
       }
     }
-    this.prevT = curr;
-    this.totalProg = (this.lap - 1) + curr;
 
     // Item box pickup (all cars)
     itemBoxes.forEach(b => {
@@ -1694,7 +1822,11 @@ class Car {
         b.active = false; b.grp.visible = false; b.respawn = BOOST_CD;
         this.boostReady = true;
         this.boostCD = 0;
-        if (this.isPlayer) { flashMsg('boostFlash', 1000); playPickup(); }
+        if (this.isPlayer) {
+          const bf = document.getElementById('boostFlash');
+          if (bf) bf.textContent = '🎁 ¡BOOST LISTO!';
+          flashMsg('boostFlash', 1000); playPickup();
+        }
       }
     });
 
@@ -1704,6 +1836,8 @@ class Car {
         this.boostTime = BOOST_DUR;
         this.boostCD = BOOST_CD;
         this.boostReady = false;
+        const bf = document.getElementById('boostFlash');
+        if (bf) bf.textContent = '⚡ BOOST!';
         flashMsg('boostFlash', 1000);
         playBoost();
       }
@@ -1810,12 +1944,16 @@ function formatTime(t) {
 
 function ordStr(n) { return n+'°'; }
 
-function getRacePos(cars, player) {
-  const sorted = [...cars].sort((a,b) => {
+function raceSort(cars) {
+  return [...cars].sort((a,b) => {
     if (a.finished !== b.finished) return a.finished ? -1 : 1;
+    if (a.finished && b.finished) return a.finTime - b.finTime;
     return b.totalProg - a.totalProg;
   });
-  return sorted.indexOf(player) + 1;
+}
+
+function getRacePos(cars, player) {
+  return raceSort(cars).indexOf(player) + 1;
 }
 
 function updateHUD(cars, player) {
@@ -1834,7 +1972,7 @@ function updateHUD(cars, player) {
   if (mTime) mTime.textContent = formatTime(raceTime);
 
   // Mobile standings
-  const sorted = [...cars].sort((a,b) => b.totalProg - a.totalProg);
+  const sorted = raceSort(cars);
   const mSt = document.getElementById('mStandings');
   if (mSt) {
     mSt.innerHTML = sorted.map((c, i) =>
@@ -1966,7 +2104,7 @@ function drawMinimap(cars, player) {
 // ================================================================
 // INPUT
 // ================================================================
-const keys = { up:false, down:false, left:false, right:false, space:false };
+const keys = { up:false, down:false, left:false, right:false, space:false, respawn:false };
 
 window.addEventListener('keydown', e => {
   if (gameState !== 'race') return;
@@ -1975,6 +2113,7 @@ window.addEventListener('keydown', e => {
   if (e.code==='ArrowLeft'  || e.code==='KeyA') { keys.left=true; e.preventDefault(); }
   if (e.code==='ArrowRight' || e.code==='KeyD') { keys.right=true; e.preventDefault(); }
   if (e.code==='Space') { keys.space=true; e.preventDefault(); }
+  if (e.code==='KeyR')  { keys.respawn=true; e.preventDefault(); }
 });
 window.addEventListener('keyup', e => {
   if (e.code==='ArrowUp'    || e.code==='KeyW') keys.up=false;
@@ -1982,6 +2121,7 @@ window.addEventListener('keyup', e => {
   if (e.code==='ArrowLeft'  || e.code==='KeyA') keys.left=false;
   if (e.code==='ArrowRight' || e.code==='KeyD') keys.right=false;
   if (e.code==='Space') keys.space=false;
+  if (e.code==='KeyR')  keys.respawn=false;
 });
 
 // Touch controls
@@ -2384,10 +2524,12 @@ function startCountdown() {
     const _pt = trackCurve.getPoint(_t);
     const _tn = trackCurve.getTangent(_t).normalize();
     const _rt = new THREE.Vector3(_tn.z, 0, -_tn.x);
-    tSamp[_i] = { point: _pt, tangent: _tn, right: _rt };
+    tSamp[_i] = { t: _t, point: _pt, tangent: _tn, right: _rt };
   }
   // Rebuild track mesh for selected circuit
   buildTrackMesh();
+  // Las cajas de ítems deben seguir al trazado activo
+  repositionItemBoxes();
 
   // Reset DDA state
   aiDifficulty = 0.5;
@@ -2413,6 +2555,10 @@ function startCountdown() {
     c.sIdx = SAMPLES-6;
     c.trackT = (SAMPLES-6)/SAMPLES;
     c.prevT = c.trackT;
+    // Arrancan justo antes de meta: progreso negativo para que la vuelta 1
+    // cuente al cruzar la línea y la clasificación inicial sea correcta
+    c.progress = c.trackT - 1;
+    c.totalProg = c.progress;
     c.angle = Math.atan2(s0.tangent.x, s0.tangent.z);
     c.updateMesh();
   });
@@ -2550,7 +2696,7 @@ let lastT = performance.now();
 
 function animate(now) {
   requestAnimationFrame(animate);
-  const dt = Math.min((now - lastT) / 1000, 0.05);
+  const dt = Math.max(0, Math.min((now - lastT) / 1000, 0.05));
   lastT = now;
 
   // Item box animation
@@ -2620,12 +2766,13 @@ function animate(now) {
         // === AI TURBO BURST when player leads comfortably ===
         // If player is clearly ahead → all AI cars get a 5s speed burst
         const playerLead = _pc.totalProg - (sorted[1] ? sorted[1].totalProg : _pc.totalProg - 0.2);
-        // Trigger turbo earlier (lead>0.04) and harder (+18-30% speed)
-        if (playerLead > 0.04 && aiDifficulty > 0.45) {
+        // Turbo moderado: solo con ventaja clara, y nunca por encima del
+        // tope de maxSpd (la carrera se aprieta sin sentirse amañada)
+        if (playerLead > 0.08 && aiDifficulty > 0.5) {
           cars.forEach(c => {
             if (!c.isPlayer) {
-              c._turboBurst = 7.0;                          // 7s burst
-              c._turboMult  = 0.25 + aiDifficulty * 0.20;  // +25-45% speed
+              c._turboBurst = 5.0;                         // 5s burst
+              c._turboMult  = 0.08 + aiDifficulty * 0.10;  // +8-18% speed
             }
           });
         }
