@@ -488,6 +488,23 @@ scene.fog = new THREE.Fog(0xadd8e6, 280, 660);
   const horizon = new THREE.Mesh(horizonGeo, horizonMat);
   horizon.position.y = -60;
   scene.add(horizon);
+  // Nubes: grupos de esferas aplanadas, sin niebla para que se vean lejos
+  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, transparent: true, opacity: 0.85 });
+  for (let c = 0; c < 12; c++) {
+    const cloud = new THREE.Group();
+    const nPuffs = 3 + Math.floor(Math.random() * 3);
+    for (let p = 0; p < nPuffs; p++) {
+      const r = 14 + Math.random() * 16;
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 7, 5), cloudMat);
+      puff.position.set((p - nPuffs/2) * r * 1.1, (Math.random()-0.5) * 6, (Math.random()-0.5) * 14);
+      puff.scale.y = 0.45;
+      cloud.add(puff);
+    }
+    const ang = (c / 12) * Math.PI * 2 + Math.random() * 0.4;
+    const rad = 260 + Math.random() * 220;
+    cloud.position.set(Math.cos(ang) * rad, 110 + Math.random() * 70, Math.sin(ang) * rad);
+    scene.add(cloud);
+  }
 }
 
 const camera = new THREE.PerspectiveCamera(92, innerWidth / innerHeight, 0.15, 1200);
@@ -601,8 +618,7 @@ const RAW_WP_MONTMELO = [
   [27,-399],
   [45,-415],
   [59,-427],
-  [69,-433],
-  [79,-441]
+  [69,-433]
 ].map(([x,z]) => new THREE.Vector3(x, 0, z));
 
 // Active track (set by UI selection)
@@ -612,16 +628,22 @@ const TRACK_CONFIGS = [
   { name: 'Circuit de Catalunya', wps: RAW_WP_MONTMELO }
 ];
 function buildTrackCurve(wps) {
-  return new THREE.CatmullRomCurve3(wps, true, 'catmullrom', 0.5);
+  // 'centripetal' evita bucles y oscilaciones cuando los waypoints
+  // no son equidistantes (caso Montmeló, muy denso cerca de meta)
+  const c = new THREE.CatmullRomCurve3(wps, true, 'centripetal');
+  c.arcLengthDivisions = 1200; // mapeo fino para muestreo uniforme en distancia
+  return c;
 }
 let trackCurve = buildTrackCurve(RAW_WP_GAVA);
 
 // Precompute SAMPLES equally-spaced points
+// getPointAt/getTangentAt usan longitud de arco: muestras equidistantes
+// aunque los waypoints no lo sean (clave para la parrilla y los pianos)
 const tSamp = [];
 for (let i = 0; i < SAMPLES; i++) {
   const t = i / SAMPLES;
-  const point   = trackCurve.getPoint(t);
-  const tangent = trackCurve.getTangent(t).normalize();
+  const point   = trackCurve.getPointAt(t);
+  const tangent = trackCurve.getTangentAt(t).normalize();
   const right   = new THREE.Vector3(tangent.z, 0, -tangent.x);
   tSamp.push({ t, point, tangent, right });
 }
@@ -661,37 +683,47 @@ function nearestSampleGlobal(pos, carAngle) {
   return { idx: best, dist: Math.sqrt(trueMin) };
 }
 
-// Build ribbon mesh helper
-function makeRibbon(innerW, outerW, color, vertexCol) {
-  const verts = [], cols = [], uvs = [], idx = [];
-  for (let i = 0; i <= SAMPLES; i++) {
-    const s = tSamp[i % SAMPLES];
-    const { point: p, right: r } = s;
-    verts.push(p.x + r.x*innerW, 0.005, p.z + r.z*innerW,
-               p.x + r.x*outerW, 0.005, p.z + r.z*outerW);
-    if (vertexCol) {
-      const red = Math.floor(i/5)%2 === 0;
-      const c = red ? [0.88,0.08,0.08] : [0.96,0.96,0.96];
-      cols.push(...c, ...c);
-    }
-    uvs.push(0, i*0.4, 1, i*0.4);
-    if (i < SAMPLES) {
-      const b = i*2;
-      idx.push(b, b+2, b+1, b+1, b+2, b+3);
-    }
+// ── Textura procedural de asfalto (grano + banda de goma en la trazada) ──
+let _asphaltTex = null;
+function getAsphaltTexture() {
+  if (_asphaltTex) return _asphaltTex;
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#262626';
+  ctx.fillRect(0, 0, 128, 128);
+  // Grano del asfalto
+  const img = ctx.getImageData(0, 0, 128, 128);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const n = (Math.random() - 0.5) * 24;
+    img.data[i] += n; img.data[i+1] += n; img.data[i+2] += n;
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-  if (vertexCol) geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
-  const mat = vertexCol
-    ? new THREE.MeshLambertMaterial({ vertexColors: true })
-    : new THREE.MeshLambertMaterial({ color });
-  const m = new THREE.Mesh(geo, mat);
-  m.receiveShadow = true;
-  return m;
+  ctx.putImageData(img, 0, 0);
+  // Goma acumulada: banda oscura en el centro (eje X del canvas = ancho de pista)
+  const grad = ctx.createLinearGradient(0, 0, 128, 0);
+  grad.addColorStop(0.00, 'rgba(0,0,0,0)');
+  grad.addColorStop(0.32, 'rgba(0,0,0,0.30)');
+  grad.addColorStop(0.50, 'rgba(0,0,0,0.38)');
+  grad.addColorStop(0.68, 'rgba(0,0,0,0.30)');
+  grad.addColorStop(1.00, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 128, 128);
+  _asphaltTex = new THREE.CanvasTexture(cv);
+  _asphaltTex.wrapS = _asphaltTex.wrapT = THREE.RepeatWrapping;
+  return _asphaltTex;
+}
+
+// Distancia mínima de un punto al eje del trazado activo.
+// Sirve para no colocar decorado encima de otro tramo de la pista.
+function nearestTrackDist(x, z) {
+  let min = Infinity;
+  for (let i = 0; i < SAMPLES; i += 3) {
+    const p = tSamp[i].point;
+    const dx = p.x - x, dz = p.z - z;
+    const d = dx*dx + dz*dz;
+    if (d < min) min = d;
+  }
+  return Math.sqrt(min);
 }
 
 // ── trackGroup: all track meshes, rebuilt per race ──────────
@@ -701,20 +733,26 @@ scene.add(trackGroup);
 function buildTrackMesh() {
   while (trackGroup.children.length) {
     const c = trackGroup.children[0];
-    if (c.geometry) c.geometry.dispose();
-    if (c.material)  { if(Array.isArray(c.material))c.material.forEach(m=>m.dispose());else c.material.dispose(); }
+    // traverse: los árboles son Groups anidados y también hay que liberarlos
+    c.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material)  { if(Array.isArray(o.material))o.material.forEach(m=>m.dispose());else o.material.dispose(); }
+    });
     trackGroup.remove(c);
   }
 
   const isMtm = selectedTrack === 1;
 
-  // ── ribbon helper ──────────────────────────────────────────
-  function makeRibbon2(innerW, outerW, color, vertexCol) {
+  // ── ribbon helper (opt: alturas por borde y material propio) ──
+  function makeRibbon2(innerW, outerW, color, vertexCol, opt) {
+    opt = opt || {};
+    const yIn  = opt.yIn  !== undefined ? opt.yIn  : 0.005;
+    const yOut = opt.yOut !== undefined ? opt.yOut : 0.005;
     const verts=[],cols=[],uvs=[],idx=[];
     for(let i=0;i<=SAMPLES;i++){
       const s=tSamp[i%SAMPLES];const{point:p,right:r}=s;
-      verts.push(p.x+r.x*innerW,0.005,p.z+r.z*innerW,
-                 p.x+r.x*outerW,0.005,p.z+r.z*outerW);
+      verts.push(p.x+r.x*innerW,yIn,p.z+r.z*innerW,
+                 p.x+r.x*outerW,yOut,p.z+r.z*outerW);
       if(vertexCol){const red=Math.floor(i/5)%2===0;const c=red?[0.88,0.08,0.08]:[0.96,0.96,0.96];cols.push(...c,...c);}
       uvs.push(0,i*0.4,1,i*0.4);
       if(i<SAMPLES){const b=i*2;idx.push(b,b+2,b+1,b+1,b+2,b+3);}
@@ -724,15 +762,27 @@ function buildTrackMesh() {
     if(vertexCol)geo.setAttribute('color',new THREE.Float32BufferAttribute(cols,3));
     geo.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
     geo.setIndex(idx);geo.computeVertexNormals();
-    const mat=vertexCol?new THREE.MeshLambertMaterial({vertexColors:true}):new THREE.MeshLambertMaterial({color});
+    const mat=opt.mat?opt.mat:(vertexCol?new THREE.MeshLambertMaterial({vertexColors:true}):new THREE.MeshLambertMaterial({color}));
     const m=new THREE.Mesh(geo,mat);m.receiveShadow=true;return m;
   }
 
   // ── asphalt + kerbs ─────────────────────────────────────────
   const rw = ROAD_W, kw = KERB_W;
-  trackGroup.add(makeRibbon2(-rw/2, rw/2, 0x1a1a1a));
-  trackGroup.add(makeRibbon2(-rw/2-kw, -rw/2, null, true));
-  trackGroup.add(makeRibbon2(rw/2, rw/2+kw, null, true));
+  // Asfalto con grano y banda de goma en la trazada
+  const asphaltMat = new THREE.MeshLambertMaterial({ map: getAsphaltTexture(), color: 0xffffff });
+  trackGroup.add(makeRibbon2(-rw/2, rw/2, null, false, { mat: asphaltMat }));
+  // Pianos con relieve: el borde exterior queda elevado
+  trackGroup.add(makeRibbon2(-rw/2-kw, -rw/2, null, true, { yIn: 0.16, yOut: 0.02 }));
+  trackGroup.add(makeRibbon2(rw/2, rw/2+kw, null, true, { yIn: 0.02, yOut: 0.16 }));
+  // Líneas blancas de límite de pista
+  const limitMat = new THREE.MeshLambertMaterial({ color: 0xe8e8e8 });
+  trackGroup.add(makeRibbon2(-rw/2+0.25, -rw/2+0.7, null, false, { mat: limitMat, yIn: 0.02, yOut: 0.02 }));
+  trackGroup.add(makeRibbon2(rw/2-0.7, rw/2-0.25, null, false, { mat: limitMat, yIn: 0.02, yOut: 0.02 }));
+
+  // ¿Punto libre de cualquier otro tramo? (ownOff = offset previsto al propio tramo)
+  function clearOfTrack(x, z, ownOff) {
+    return nearestTrackDist(x, z) > Math.min(ownOff - 2, rw/2 + kw + 5);
+  }
 
   if(isMtm) {
     // Extra tarmac runoff beyond kerbs (F1 style)
@@ -749,15 +799,30 @@ function buildTrackMesh() {
     dash.position.set(mid.x,0.03,mid.z);dash.rotation.y=Math.atan2(dir.x,dir.z);trackGroup.add(dash);
   }
 
-  // ── start/finish line ────────────────────────────────────────
+  // ── start/finish line (damero de 3 filas, estilo profesional) ──
   {
-    const s0=tSamp[0];const checkW=rw/8;
-    for(let c=0;c<8;c++){
-      const off=(c-3.5)*checkW;
-      const pos=s0.point.clone().addScaledVector(s0.right,off);
-      const sq=new THREE.Mesh(new THREE.BoxGeometry(checkW-0.1,0.02,2.2),new THREE.MeshLambertMaterial({color:c%2===0?0xffffff:0x111111}));
-      sq.position.set(pos.x,0.04,pos.z);sq.rotation.y=Math.atan2(s0.right.x,s0.right.z);trackGroup.add(sq);
+    const s0=tSamp[0];const checkW=rw/10;const rowD=1.1;
+    const whiteM=new THREE.MeshLambertMaterial({color:0xf5f5f5});
+    const blackM=new THREE.MeshLambertMaterial({color:0x0d0d0d});
+    for(let row=0;row<3;row++) for(let c=0;c<10;c++){
+      const off=(c-4.5)*checkW;
+      const pos=s0.point.clone().addScaledVector(s0.right,off).addScaledVector(s0.tangent,(row-1)*rowD);
+      const sq=new THREE.Mesh(new THREE.BoxGeometry(checkW-0.08,0.02,rowD-0.08),(c+row)%2===0?whiteM:blackM);
+      sq.position.set(pos.x,0.045,pos.z);sq.rotation.y=Math.atan2(s0.tangent.x,s0.tangent.z);trackGroup.add(sq);
     }
+    // Plazas de parrilla pintadas (barra delantera + laterales por posición)
+    const gridM=new THREE.MeshLambertMaterial({color:0xdddddd});
+    [[0,-6],[0,6],[SAMPLES-6,-6],[SAMPLES-6,6]].forEach(([si,off])=>{
+      const sg=tSamp[si];const ry=Math.atan2(sg.tangent.x,sg.tangent.z);
+      const base=sg.point.clone().addScaledVector(sg.right,off).addScaledVector(sg.tangent,4.6);
+      const bar=new THREE.Mesh(new THREE.BoxGeometry(5,0.02,0.4),gridM);
+      bar.position.set(base.x,0.04,base.z);bar.rotation.y=ry;trackGroup.add(bar);
+      [-2.3,2.3].forEach(sx=>{
+        const sp=base.clone().addScaledVector(sg.right,sx).addScaledVector(sg.tangent,-0.85);
+        const stub=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.02,1.7),gridM);
+        stub.position.set(sp.x,0.04,sp.z);stub.rotation.y=ry;trackGroup.add(stub);
+      });
+    });
     const poleM=new THREE.MeshPhongMaterial({color:0xcccccc,shininess:80});
     [-rw/2-1.5,rw/2+1.5].forEach(o=>{
       const pp=s0.point.clone().addScaledVector(s0.right,o);
@@ -778,10 +843,18 @@ function buildTrackMesh() {
     const g=new THREE.Group();
     const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.42*sc,0.72*sc,5.5*sc,7),trunkMat);
     trunk.position.y=2.7*sc;trunk.castShadow=true;g.add(trunk);
-    [[0,5.5,3.6],[0,8,3],[0,10.2,2.1]].forEach(([,y,r],i)=>{
-      const sph=new THREE.Mesh(new THREE.SphereGeometry(r*sc,8,6),new THREE.MeshPhongMaterial({color:[0x2d8a25,0x3aaa30,0x256b1e][i],shininess:8}));
-      sph.position.y=y*sc;sph.castShadow=true;g.add(sph);
-    });
+    if(Math.random()<0.35){
+      // Pino: conos apilados
+      [[5.2,3.4,4.2],[8.0,2.6,3.4],[10.4,1.7,2.6]].forEach(([y,r,h],i)=>{
+        const cone=new THREE.Mesh(new THREE.ConeGeometry(r*sc,h*sc,8),new THREE.MeshPhongMaterial({color:[0x1e6b1a,0x257a20,0x1a5c16][i],shininess:6}));
+        cone.position.y=y*sc;cone.castShadow=true;g.add(cone);
+      });
+    } else {
+      [[0,5.5,3.6],[0,8,3],[0,10.2,2.1]].forEach(([,y,r],i)=>{
+        const sph=new THREE.Mesh(new THREE.SphereGeometry(r*sc,8,6),new THREE.MeshPhongMaterial({color:[0x2d8a25,0x3aaa30,0x256b1e][i],shininess:8}));
+        sph.position.y=y*sc;sph.castShadow=true;g.add(sph);
+      });
+    }
     g.position.set(x,0,z);trackGroup.add(g);
   }
   const treeStep = isMtm ? 18 : 22;
@@ -790,8 +863,11 @@ function buildTrackMesh() {
     const s=tSamp[i];const sc=0.7+Math.random()*0.7;
     const oL=rw/2+kw+(isMtm?14:10)+Math.random()*treeOff;
     const oR=rw/2+kw+(isMtm?14:10)+Math.random()*treeOff;
-    addTree(s.point.x+s.right.x*(-oL),s.point.z+s.right.z*(-oL),sc);
-    addTree(s.point.x+s.right.x*oR,   s.point.z+s.right.z*oR,sc*0.9);
+    const xL=s.point.x+s.right.x*(-oL), zL=s.point.z+s.right.z*(-oL);
+    const xR=s.point.x+s.right.x*oR,    zR=s.point.z+s.right.z*oR;
+    // Solo plantar si el punto no cae sobre otro tramo del circuito
+    if(clearOfTrack(xL,zL,oL)) addTree(xL,zL,sc);
+    if(clearOfTrack(xR,zR,oR)) addTree(xR,zR,sc*0.9);
   }
 
   if(!isMtm) {
@@ -801,11 +877,15 @@ function buildTrackMesh() {
     for(let i=0;i<SAMPLES;i+=60){
       const s=tSamp[i];const off=rw/2+kw+1.8;
       const pL=s.point.clone().addScaledVector(s.right,-off);
-      const h=new THREE.Mesh(new THREE.BoxGeometry(2.8,1.6,2.8),hayM);
-      h.position.set(pL.x,0.8,pL.z);h.rotation.y=Math.random()*0.4-0.2;trackGroup.add(h);
+      if(clearOfTrack(pL.x,pL.z,off)){
+        const h=new THREE.Mesh(new THREE.BoxGeometry(2.8,1.6,2.8),hayM);
+        h.position.set(pL.x,0.8,pL.z);h.rotation.y=Math.random()*0.4-0.2;h.castShadow=true;trackGroup.add(h);
+      }
       const pR=s.point.clone().addScaledVector(s.right,off);
-      const t=new THREE.Mesh(new THREE.CylinderGeometry(1.1,1.1,1.4,10),tyreM);
-      t.position.set(pR.x,0.7,pR.z);trackGroup.add(t);
+      if(clearOfTrack(pR.x,pR.z,off)){
+        const t=new THREE.Mesh(new THREE.CylinderGeometry(1.1,1.1,1.4,10),tyreM);
+        t.position.set(pR.x,0.7,pR.z);t.castShadow=true;trackGroup.add(t);
+      }
     }
     // Gava lamp posts
     const lampM=new THREE.MeshPhongMaterial({color:0x888888,shininess:60});
@@ -814,6 +894,7 @@ function buildTrackMesh() {
       const si=Math.round(lamp*(SAMPLES/80))%SAMPLES;const s=tSamp[si];
       [-rw/2-4,rw/2+4].forEach(xOff=>{
         const pp=s.point.clone().addScaledVector(s.right,xOff<0?-(rw/2+4):rw/2+4);
+        if(!clearOfTrack(pp.x,pp.z,rw/2+4)) return;
         const post=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.25,12,6),lampM);
         post.position.set(pp.x,6,pp.z);trackGroup.add(post);
         const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.5,8,6),glowM);
@@ -851,6 +932,9 @@ function buildTrackMesh() {
       const p1=s.point.clone().addScaledVector(s.right,off);
       const p2=s2.point.clone().addScaledVector(s2.right,off);
       const mid=p1.clone().lerp(p2,0.5);
+      // En el interior de las horquillas el offset cae sobre otro tramo:
+      // sin esta comprobación las barreras se cruzaban en medio de la pista
+      if(!clearOfTrack(mid.x,mid.z,barrierOff)) return;
       const dir=p2.clone().sub(p1);
       const ry=Math.atan2(dir.x,dir.z);
       const red = Math.floor(i/6)%2===0;
@@ -868,13 +952,16 @@ function buildTrackMesh() {
   }
 
   // ── F1 LAMP TOWERS (tall double-arm, every ~40 samples) ──────
-  const lampPostM = new THREE.MeshPhongMaterial({color:0x777777,shininess:70,metalness:0.6});
+  const lampPostM = new THREE.MeshPhongMaterial({color:0x777777,shininess:70,specular:0xaaaaaa});
   const lampGlowM = new THREE.MeshPhongMaterial({color:0xfff5cc,emissive:0xffee88,emissiveIntensity:1.2,shininess:5});
   const lampBaseM = new THREE.MeshPhongMaterial({color:0x333333,shininess:30});
   for(let i=0;i<SAMPLES;i+=40){
     const s=tSamp[i];
+    // Brazo y luminarias alineados con el vector right del trazado
+    const armRY=Math.atan2(-s.right.z,s.right.x);
     [-rw/2-kw-12, rw/2+kw+12].forEach((off,side)=>{
       const pp=s.point.clone().addScaledVector(s.right,off);
+      if(!clearOfTrack(pp.x,pp.z,Math.abs(off))) return;
       // Base plate
       const base=new THREE.Mesh(new THREE.BoxGeometry(2.8,0.6,2.8),lampBaseM);
       base.position.set(pp.x,0.3,pp.z);trackGroup.add(base);
@@ -883,18 +970,16 @@ function buildTrackMesh() {
       pole.position.set(pp.x,13,pp.z);pole.castShadow=true;trackGroup.add(pole);
       // Cross arm
       const arm=new THREE.Mesh(new THREE.BoxGeometry(6,0.22,0.22),lampPostM);
-      arm.position.set(pp.x,26,pp.z);trackGroup.add(arm);
+      arm.position.set(pp.x,26,pp.z);arm.rotation.y=armRY;trackGroup.add(arm);
       // Two bulbs per arm
       [-2.2,2.2].forEach(bx=>{
-        const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.65,10,8),lampGlowM);
-        bulb.position.set(pp.x+s.right.x*0+bx,25.6,pp.z);
-        // Orient bulb along track right direction
         const bx2 = bx * s.right.x; const bz2 = bx * s.right.z;
+        const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.65,10,8),lampGlowM);
         bulb.position.set(pp.x + bx2, 25.6, pp.z + bz2);
         trackGroup.add(bulb);
         // Fixture housing
         const fix=new THREE.Mesh(new THREE.BoxGeometry(1.4,0.5,0.9),lampPostM);
-        fix.position.set(pp.x+bx2,25.9,pp.z+bz2);trackGroup.add(fix);
+        fix.position.set(pp.x+bx2,25.9,pp.z+bz2);fix.rotation.y=armRY;trackGroup.add(fix);
       });
     });
   }
@@ -1052,6 +1137,7 @@ function buildTrackMesh() {
     const dir=s2.point.clone().sub(s.point);const ry=Math.atan2(dir.x,dir.z);
     [-rw/2-kw-10.5, rw/2+kw+10.5].forEach((off,si)=>{
       const pp=s.point.clone().addScaledVector(s.right,off);
+      if(!clearOfTrack(pp.x,pp.z,Math.abs(off))) return;
       const col=adColors[(i+si)%adColors.length];
       const board=new THREE.Mesh(new THREE.BoxGeometry(8.5,2.8,0.25),
         new THREE.MeshPhongMaterial({color:col,emissive:col,emissiveIntensity:0.25,shininess:60}));
@@ -1077,6 +1163,7 @@ function buildTrackMesh() {
     const s=tSamp[ci%SAMPLES];
     [-rw/2-kw-8, rw/2+kw+8].forEach(off=>{
       const pp=s.point.clone().addScaledVector(s.right,off);
+      if(!clearOfTrack(pp.x,pp.z,Math.abs(off))) return;
       const brd=new THREE.Mesh(new THREE.BoxGeometry(2.2,3.5,0.2),
         new THREE.MeshPhongMaterial({color:0xff2200,shininess:50}));
       brd.position.set(pp.x,2,pp.z);
@@ -1093,6 +1180,7 @@ function buildTrackMesh() {
   for(let i=8;i<SAMPLES;i+=25){
     const s=tSamp[i];const off=rw/2+kw+11;
     const pp=s.point.clone().addScaledVector(s.right,off*(Math.random()>0.5?1:-1));
+    if(!clearOfTrack(pp.x,pp.z,off)) continue;
     const post=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,3.5,6),marshalM);
     post.position.set(pp.x,1.75,pp.z);trackGroup.add(post);
     const top=new THREE.Mesh(new THREE.BoxGeometry(1.4,1.4,0.15),marshalM);
@@ -1561,55 +1649,34 @@ class Car {
       }
     }
 
-    // Adaptive look-ahead: shorter for Montmelo (tighter corners need quicker reaction)
-    // Reducir look-ahead cuando el coche está muy fuera de carril para que vuelva antes
-    const baseLa = isMontmelo ? 22 : 35;
-    const _offPenalty = Math.min(20, Math.floor(this.distFromTrack / 4));
-    const la = Math.max(8, baseLa - _offPenalty + Math.floor(this.speed / (isMontmelo ? 5 : 3)));
+    // ── Pure pursuit: perseguir un punto concreto de la línea de carrera ──
+    // Apuntar a un punto del trazado (y no a su tangente lejana) hace que
+    // seguir la pista y volver a ella tras un golpe sea el mismo movimiento,
+    // sin correcciones laterales que luchen contra la dirección.
+    const laBase = isMontmelo ? 6 : 8;
+    const la = laBase + Math.floor(this.speed / (isMontmelo ? 13 : 10));
     const ti = (this.sIdx + la) % SAMPLES;
     const ts = tSamp[ti];
 
-    // Curve detection: check heading change over a shorter window for Montmelo
-    const laFar = (this.sIdx + la + (isMontmelo ? 15 : 25)) % SAMPLES;
+    // Curvatura por delante del punto objetivo (para ápice y frenada)
+    const laFar = (ti + (isMontmelo ? 10 : 14)) % SAMPLES;
     const tsFar = tSamp[laFar];
-    let angA = Math.atan2(ts.tangent.x, ts.tangent.z);
-    let angB = Math.atan2(tsFar.tangent.x, tsFar.tangent.z);
-    let dAng = angB - angA;
+    let dAng = Math.atan2(tsFar.tangent.x, tsFar.tangent.z) - Math.atan2(ts.tangent.x, ts.tangent.z);
     while (dAng >  Math.PI) dAng -= Math.PI*2;
     while (dAng < -Math.PI) dAng += Math.PI*2;
     const farDiff = Math.abs(dAng);
-    const curveAhead = farDiff > (isMontmelo ? 0.25 : 0.4);
 
-    // Lateral correction: stronger pull-to-center for Montmelo
-    const toCar = this.pos.clone().sub(tSamp[this.sIdx].point);
-    const rawLat = toCar.x * tSamp[this.sIdx].right.x + toCar.z * tSamp[this.sIdx].right.z;
-    const centerMult = isMontmelo ? 2.2 : 1.75;
+    // Línea de carrera: dAng > 0 = la curva gira hacia el vector right,
+    // así que el interior (ápice) queda en el lado positivo de right
+    const apexClamp = ROAD_W * 0.18;
+    let targetOff = Math.max(-apexClamp, Math.min(apexClamp, dAng * ROAD_W * 0.55));
+    if (defending) targetOff += defendSide * ROAD_W * 0.15;
+    const maxLat = ROAD_W * 0.25;
+    targetOff = Math.max(-maxLat, Math.min(maxLat, targetOff));
 
-    // Línea de carrera: apuntar al interior de la curva que viene (ápice)
-    // dAng > 0 = curva a izquierdas → interior = lado izquierdo (offset negativo)
-    const apexClamp = ROAD_W * 0.22;
-    const apexTarget = Math.max(-apexClamp, Math.min(apexClamp, -dAng * ROAD_W * 0.9));
-    let lateralOff = (rawLat - apexTarget) * centerMult;
-
-    if (defending) {
-      lateralOff += defendSide * ROAD_W * 0.15;
-    }
-
-    // Tighter clamp for Montmelo (narrower racing line)
-    const maxLat = ROAD_W * (isMontmelo ? 0.28 : 0.35);
-    lateralOff = Math.max(-maxLat, Math.min(maxLat, lateralOff));
-
-    // Steering: blend toward target waypoint tangent, corrected for lateral offset
-    const tgtDir = ts.tangent.clone();
-    // Corrección más agresiva cuando el coche está lejos del centro del carril
-    const _distFactor = Math.min(3.0, 1.0 + Math.max(0, this.distFromTrack - ROAD_W * 0.25) / (ROAD_W * 0.4));
-    const corrStrength = (isMontmelo ? 0.26 : 0.20) * _distFactor;
-    tgtDir.x -= lateralOff * corrStrength * tSamp[this.sIdx].right.x;
-    tgtDir.z -= lateralOff * corrStrength * tSamp[this.sIdx].right.z;
-    tgtDir.normalize();
-
-    const tgtAngle = Math.atan2(tgtDir.x, tgtDir.z);
-    let diff = tgtAngle - this.angle;
+    const tgtX = ts.point.x + ts.right.x * targetOff;
+    const tgtZ = ts.point.z + ts.right.z * targetOff;
+    let diff = Math.atan2(tgtX - this.pos.x, tgtZ - this.pos.z) - this.angle;
     while (diff >  Math.PI) diff -= Math.PI*2;
     while (diff < -Math.PI) diff += Math.PI*2;
 
@@ -1643,17 +1710,10 @@ class Car {
     // Speed management
     // DDA: easy AI brakes more, hard AI carries more speed
     const ddaBrakeMult = 1.5 - aiDifficulty * 1.25; // easy=1.5x braking, hard=0.25x
-    const curvePenalty = Math.min(0.45, Math.abs(diff) * (isMontmelo ? 0.65 : 0.5) * ddaBrakeMult);
-    const offCenterPenalty = Math.min(0.12, Math.abs(lateralOff) / (ROAD_W * 0.5));
-    let tgtSpd = this.maxSpd() * (1 - curvePenalty - offCenterPenalty);
-
-    if (curveAhead) {
-      // DDA: easy AI slows more on curves
-      const curveSlowFactor = isMontmelo
-        ? (0.58 + aiDifficulty * 0.34)   // easy=0.58, hard=0.92
-        : (0.68 + aiDifficulty * 0.26);  // easy=0.68, hard=0.94
-      tgtSpd *= curveSlowFactor;
-    }
+    // Frena según el error de rumbo actual y la curvatura que se acerca
+    const curvePenalty = Math.min(0.55,
+      (Math.abs(diff) * 0.55 + farDiff * (isMontmelo ? 0.5 : 0.4)) * ddaBrakeMult);
+    let tgtSpd = this.maxSpd() * (1 - curvePenalty);
     if (defending) tgtSpd *= 1.06;
     tgtSpd *= avoidBrake;
 
@@ -1669,7 +1729,7 @@ class Car {
     this.speed += Math.sign(spDiff) * Math.min(Math.abs(spDiff), ACCEL * accelRate * dt);
     this.speed = Math.max(0, Math.min(this.maxSpd(), this.speed));
 
-    this.steerVis = this.aiAngleDiff * 0.35;
+    this.steerVis = Math.max(-0.5, Math.min(0.5, this.aiAngleDiff * 0.5));
     this.rollVis  = -this.steerVis * 0.18;
   }
 
@@ -1707,10 +1767,12 @@ class Car {
       // Lateral signed offset (positive = car is to the right of center)
       const latSign = toCenter.x * nearest.right.x + toCenter.z * nearest.right.z;
       const latDist = Math.abs(latSign);
-      const threshold = ROAD_W * (selectedTrack === 1 ? 0.32 : 0.30);
+      // Umbral por encima del máximo que persigue la IA (ROAD_W*0.25):
+      // así esta corrección es solo red de seguridad y no lucha con el volante
+      const threshold = ROAD_W * 0.38;
       if (latDist > threshold) {
         // Push toward center: direction = sign of latSign * right vector
-        const pushStrength = Math.min(8.0, (latDist - threshold) * 3.5);
+        const pushStrength = Math.min(6.0, (latDist - threshold) * 2.5);
         this.pos.x += Math.sign(latSign) * nearest.right.x * pushStrength * dt;
         this.pos.z += Math.sign(latSign) * nearest.right.z * pushStrength * dt;
       }
@@ -1813,6 +1875,7 @@ class Car {
           playerLapTimes.push(raceTime - this._lapStartTime);
         }
         this._lapStartTime = raceTime;
+        saveStoredSkill(aiDifficulty); // persistir habilidad cada vuelta
       }
     }
 
@@ -2086,6 +2149,18 @@ function drawMinimap(cars, player) {
   ctx.closePath();
   ctx.strokeStyle='#555'; ctx.lineWidth=9; ctx.stroke();
   ctx.strokeStyle='#888'; ctx.lineWidth=6; ctx.stroke();
+
+  // Línea de meta (muesca blanca cruzando el trazado)
+  {
+    const sf = tSamp[0];
+    const sfx = offX + sf.point.x*scl, sfy = offZ + sf.point.z*scl;
+    ctx.save();
+    ctx.translate(sfx, sfy);
+    ctx.rotate(Math.atan2(sf.right.z, sf.right.x));
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(-4.5, -1.5, 9, 3);
+    ctx.restore();
+  }
 
   // Cars
   const palettes = ['#4488ff','#ff8800','#ff44aa','#cc8844'];
@@ -2465,11 +2540,23 @@ let raceTime = 0;
 let gameState = 'start'; // start | countdown | race | finish
 
 // ── Dynamic Difficulty Adjustment (DDA) ──────────────────────────────
-let aiDifficulty   = 0.62;  // 0=easy, 1=hard (starts above medium)
+// La habilidad estimada del jugador persiste entre carreras (localStorage),
+// así la siguiente carrera arranca ya ajustada a su nivel real.
+function loadStoredSkill() {
+  try {
+    const v = parseFloat(localStorage.getItem('kart_skill'));
+    return isNaN(v) ? 0.5 : Math.max(0.08, Math.min(1, v));
+  } catch(e) { return 0.5; }
+}
+function saveStoredSkill(v) {
+  try { localStorage.setItem('kart_skill', v.toFixed(3)); } catch(e) {}
+}
+let aiDifficulty   = loadStoredSkill(); // 0=easy, 1=hard
 let ddaTimer       = 0;     // seconds since last DDA update
 const DDA_INTERVAL = 3;     // re-evaluate every 3 seconds
 let playerOffTrackCount = 0; // total off-track events this race
 let playerLapTimes  = [];    // recorded lap times
+let playerSpeedAccum = 0;    // suma de velocidad·dt para ritmo medio
 let ddaLogTimer     = 0;     // for HUD message throttle
 let finishedCars = [];
 let selectedDriver = 0;
@@ -2478,6 +2565,7 @@ function onFinish(car) {
   car.finPos = finishedCars.length + 1;
   finishedCars.push(car);
   if (car.isPlayer) {
+    saveStoredSkill(aiDifficulty);
     setTimeout(() => showFinish(), 2000);
   } else if (finishedCars.length >= cars.length) {
     setTimeout(() => showFinish(), 2000);
@@ -2521,8 +2609,8 @@ function startCountdown() {
   trackCurve = buildTrackCurve(_tcfg.wps);
   for (let _i = 0; _i < SAMPLES; _i++) {
     const _t  = _i / SAMPLES;
-    const _pt = trackCurve.getPoint(_t);
-    const _tn = trackCurve.getTangent(_t).normalize();
+    const _pt = trackCurve.getPointAt(_t);
+    const _tn = trackCurve.getTangentAt(_t).normalize();
     const _rt = new THREE.Vector3(_tn.z, 0, -_tn.x);
     tSamp[_i] = { t: _t, point: _pt, tangent: _tn, right: _rt };
   }
@@ -2531,11 +2619,12 @@ function startCountdown() {
   // Las cajas de ítems deben seguir al trazado activo
   repositionItemBoxes();
 
-  // Reset DDA state
-  aiDifficulty = 0.5;
+  // Reset DDA state (la dificultad inicial viene de la habilidad guardada)
+  aiDifficulty = loadStoredSkill();
   ddaTimer = 0;
   playerOffTrackCount = 0;
   playerLapTimes = [];
+  playerSpeedAccum = 0;
   ddaLogTimer = 0;
 
   document.getElementById('startScreen').style.display='none';
@@ -2719,6 +2808,7 @@ function animate(now) {
       if (_pc && _pc.distFromTrack > ROAD_W * 0.55) {
         playerOffTrackCount += dt;  // accumulate off-track seconds
       }
+      if (_pc) playerSpeedAccum += _pc.speed * dt; // ritmo medio para DDA
 
       // ── DDA: update difficulty every DDA_INTERVAL seconds ──
       ddaTimer += dt;
@@ -2751,8 +2841,13 @@ function animate(now) {
           lapTrendFactor = last < prev ? 0.8 : 0.3; // improving=higher skill
         }
 
+        // 5. Ritmo: velocidad media sostenida respecto al máximo
+        //    (mide la calidad de conducción aunque vaya último)
+        const avgSpd = playerSpeedAccum / Math.max(1, raceTime);
+        const paceFactor = Math.max(0, Math.min(1, (avgSpd / MAX_SPEED - 0.35) / 0.5));
+
         // === COMBINED SKILL SCORE (0=struggling, 1=dominating) ===
-        const rawSkill = posFactor * 0.50 + offFactor * 0.25 + lapTrendFactor * 0.15 + (1-gapFactor)*0.10;
+        const rawSkill = posFactor * 0.40 + offFactor * 0.20 + paceFactor * 0.20 + lapTrendFactor * 0.10 + (1-gapFactor)*0.10;
         const clampedSkill = Math.max(0, Math.min(1, rawSkill));
 
         // === SMOOTH DIFFICULTY ADJUSTMENT (asymmetric) ===
