@@ -3497,7 +3497,7 @@ function animate(now) {
   }
   showroom.visible = gameState === 'start';
   document.getElementById('hud').style.visibility = gameState === 'start' ? 'hidden' : 'visible';
-  document.getElementById('touch-controls').style.visibility = gameState === 'race' ? 'visible' : 'hidden';
+  document.getElementById('touch-controls').style.visibility = (gameState === 'race' || gameState === 'countdown') ? 'visible' : 'hidden';
 
   // Item box animation
   itemBoxes.forEach(b => {
@@ -3588,9 +3588,11 @@ function animate(now) {
     resolveCollisions(dt);
     if (cars.length) {
       updateCamera(cars[0], dt);
-      if (gameState==='race') {
+      if (gameState==='race' || gameState==='countdown') {
         hudTick += dt;
         if (hudTick >= 0.075) { updateHUD(cars, cars[0]); hudTick = 0; }
+      }
+      if (gameState==='race') {
         // DDA bar
         const _turboFill = document.getElementById('turbo-fill');
         const _turboLbl  = document.getElementById('turbo-label');
