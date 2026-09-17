@@ -387,6 +387,53 @@ button, [role="radio"] { min-width:44px; min-height:44px; -webkit-tap-highlight-
 @media (prefers-reduced-motion:reduce) {
   *, *::before, *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
 }
+#startScreen { display:grid !important; place-items:center; padding:max(12px,var(--safe-top)) max(12px,var(--safe-right)) max(12px,var(--safe-bottom)) max(12px,var(--safe-left)); background:radial-gradient(ellipse at 10% 0%,#18374b 0%,#0a1720 48%,#060c12 100%); overflow:hidden; }
+#startScreen[style*="display: none"], #startScreen[style*="display:none"] { display:none !important; }
+#startScreen .menu-panel { width:min(100%,1000px); max-height:100%; height:auto; min-width:0; margin:0; padding:clamp(14px,3vw,30px); display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto auto auto minmax(80px,0.9fr) minmax(124px,1.1fr) 52px 44px; gap:10px; border:1px solid #2a424f; border-radius:24px; background:linear-gradient(140deg,rgba(23,43,55,.96),rgba(9,20,29,.98)); box-shadow:0 24px 90px #0007; backdrop-filter:none; }
+#startScreen .menu-panel > * { min-width:0; min-height:0; margin:0; }
+#startScreen .menu-brand { font-size:9px; letter-spacing:3px; color:#8eaab9; }
+#startScreen .start-title { font-size:clamp(28px,4vw,44px) !important; letter-spacing:-1.5px; line-height:1; }
+#startScreen .start-sub { font-size:11px; line-height:1.3; color:#9ab1bf; text-transform:none; letter-spacing:0; }
+#startScreen .section-label, #startScreen .track-select-label { font-size:10px; letter-spacing:1.5px; line-height:16px; }
+#startScreen .drivers { grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+#startScreen .driver-card { position:relative; display:flex; flex-direction:column; justify-content:center; padding:6px 4px 10px; border-radius:14px; border:1px solid #2a404d; background:radial-gradient(ellipse at 50% 30%,#233e50,#101f2b 80%); overflow:hidden; }
+#startScreen .driver-card.selected { border-color:var(--lime); background:radial-gradient(ellipse at 50% 30%,#354a3b,#15292a 80%); box-shadow:inset 0 -3px var(--lime); }
+#startScreen .driver-card::after { content:'0' attr(data-driver); position:absolute; top:7px; left:8px; color:#a0b8c4; font-size:9px; font-weight:700; }
+#startScreen .driver-kart { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; width:100%; margin:0; }
+#startScreen .driver-kart img { width:auto; max-width:100%; height:100%; max-height:clamp(56px,13vh,130px); object-fit:contain; min-height:0; filter:drop-shadow(0 8px 7px #0008); }
+#startScreen .driver-name { font-size:clamp(11px,2.5vw,16px); margin:0; line-height:20px; }
+#startScreen .driver-role, #startScreen .driver-desc, #startScreen .driver-you { display:none; }
+#startScreen .track-select-wrap { display:flex; flex-direction:column; gap:8px; }
+#startScreen .track-cards { flex:1; min-height:0; gap:8px; }
+#startScreen .track-card { display:grid; grid-template-rows:minmax(30px,1fr) auto auto; gap:3px; padding:10px 12px; border-radius:14px; background:linear-gradient(145deg,#142c38,#101e28); border-color:#2a404d; }
+#startScreen .track-card.selected { border-color:var(--cyan); box-shadow:inset 0 -3px var(--cyan); }
+#startScreen .track-card-icon { height:auto; min-height:0; margin:0; }
+#startScreen .track-card-icon svg { display:block; filter:drop-shadow(0 0 7px #5ce5ee33); }
+#startScreen .track-card-name { font-size:12px; line-height:16px; margin:0; }
+#startScreen .track-card-sub { font-size:8px; line-height:12px; letter-spacing:.5px; }
+#startScreen .start-btn { display:flex; align-items:center; justify-content:space-between; min-height:48px; padding:0 18px; border-radius:12px; font-size:13px; letter-spacing:1.4px; }
+#startScreen .start-btn::after { content:'→'; font-size:24px; }
+#startScreen .sound-toggle { width:100%; min-height:44px; padding:8px; border:none; background:transparent; color:#aec2cf; font-size:10px; letter-spacing:1.2px; }
+#startScreen .controls-hint { display:none; }
+@media (max-width:600px) {
+  #startScreen .menu-panel { padding:16px; border-radius:20px; gap:8px; }
+}
+@media (max-height:650px) and (orientation:portrait) {
+  #startScreen .menu-panel { grid-template-rows:auto auto auto minmax(72px,1fr) minmax(110px,1fr) 48px 44px; padding:12px; gap:6px; }
+  #startScreen .menu-brand { display:none; }
+  #startScreen .track-card { padding:6px 8px; }
+}
+@media (orientation:landscape) and (max-height:600px) {
+  #startScreen .menu-panel { grid-template-columns:minmax(0,1.05fr) minmax(0,1fr); grid-template-rows:auto auto 16px minmax(80px,1fr) 48px; gap:8px 20px; padding:16px; }
+  #startScreen .menu-brand { display:none; }
+  #startScreen .start-title { grid-column:1; font-size:28px !important; }
+  #startScreen .start-sub { grid-column:1; font-size:10px; }
+  #startScreen #driverLabel { grid-column:1; grid-row:3; }
+  #startScreen .drivers { grid-column:1; grid-row:4; }
+  #startScreen .track-select-wrap { grid-column:2; grid-row:1 / 5; }
+  #startScreen .start-btn { grid-column:2; grid-row:5; }
+  #startScreen .sound-toggle { grid-column:1; grid-row:5; }
+}
 </style>
 </head>
 <body>
@@ -3396,6 +3443,39 @@ const showroomKarts = CAR_CFG.map((cfg, i) => {
   return kart;
 });
 scene.add(showroom);
+{
+  const previewScene = new THREE.Scene();
+  previewScene.environment = scene.environment;
+  previewScene.add(new THREE.HemisphereLight(0xe4f5ff, 0x374354, 1.1));
+  const keyLight = new THREE.DirectionalLight(0xfff1db, 2);
+  keyLight.position.set(5, 10, 8); previewScene.add(keyLight);
+  const previewCamera = new THREE.PerspectiveCamera(36, 1.6, 0.1, 100);
+  previewCamera.position.set(9, 8, 13); previewCamera.lookAt(0, 1.2, 0);
+  const target = new THREE.WebGLRenderTarget(320, 200);
+  target.texture.encoding = THREE.sRGBEncoding;
+  const pixels = new Uint8Array(320 * 200 * 4);
+  const imageCanvas = document.createElement('canvas');
+  imageCanvas.width = 320; imageCanvas.height = 200;
+  const ctx = imageCanvas.getContext('2d');
+  const imageData = ctx.createImageData(320, 200);
+  const clearColor = renderer.getClearColor(new THREE.Color()).clone();
+  const clearAlpha = renderer.getClearAlpha();
+  renderer.setClearColor(0x000000, 0);
+  showroomKarts.forEach((kart, i) => {
+    previewScene.add(kart); kart.visible = true;
+    renderer.setRenderTarget(target);
+    renderer.render(previewScene, previewCamera);
+    renderer.readRenderTargetPixels(target, 0, 0, 320, 200, pixels);
+    for (let y = 0; y < 200; y++) imageData.data.set(pixels.subarray((199-y)*1280, (200-y)*1280), y*1280);
+    ctx.putImageData(imageData, 0, 0);
+    const image = new Image(); image.src = imageCanvas.toDataURL(); image.alt = ''; image.draggable = false;
+    document.querySelector(`[data-driver="${i}"] .driver-kart`).replaceChildren(image);
+    showroom.add(kart); kart.visible = i === selectedDriver;
+  });
+  renderer.setRenderTarget(null);
+  renderer.setClearColor(clearColor, clearAlpha);
+  target.dispose();
+}
 let frameBudget = 0;
 let frameSamples = 0;
 let hudTick = 0;
